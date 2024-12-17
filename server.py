@@ -1,8 +1,11 @@
-from flask import Flask, request
-from flask_socketio import SocketIO, emit
+from flask import Flask, request, jsonify
+from threading import Lock
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Cache to store the message and lock for thread safety
+message_cache = {"message": None}
+cache_lock = Lock()
 
 # Webhook route to receive messages
 @app.route('/webhook', methods=['POST', 'GET'])
@@ -11,18 +14,22 @@ def webhook():
     message = f"{data}"
     print('Server received:', message)
 
-    socketio.emit('new_message', {'message': message})
+    # Save the message to the cache (overwrites previous messages)
+    with cache_lock:
+        message_cache["message"] = message
 
-    return "ok", 200
+    return "Message received and cached", 200
 
-
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print('Client disconnected')
+# Retrieve the message (only once)
+@app.route('/retrieve', methods=['GET'])
+def retrieve_message():
+    with cache_lock:
+        if message_cache["message"]:
+            # Retrieve and delete the message
+            retrieved_message = message_cache.pop("message")
+            return jsonify({"message": retrieved_message}), 200
+        else:
+            return jsonify({"error": "No message available"}), 404
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True, port=5000)
+    app.run(debug=True, port=5000)
